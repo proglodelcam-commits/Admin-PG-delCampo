@@ -1,12 +1,8 @@
-// ═══════════════════════════════════════════════════════
-// PG del Campo — Service Worker Unificado (GitHub Pages PWA)
-// Versión: 2.0 — 2026-09-11
-// ═══════════════════════════════════════════════════════
+// PG del Campo — Service Worker v1.0.0
+// Estrategia: Network-first con cache fallback
 
-const CACHE_NAME = 'pg-del-campo-v2';
-
-// Assets locales a pre-cachear durante la instalación
-const PRECACHE_ASSETS = [
+var CACHE_NAME = 'pg-del-campo-v1';
+var ASSETS = [
   './',
   './index.html',
   './tienda.html',
@@ -14,103 +10,73 @@ const PRECACHE_ASSETS = [
   './admin.html',
   './enlaces.html',
   './manifest.webmanifest',
-  './favicon.ico',
   './icons/favicon.png',
-  './icons/favicon-16x16.png',
   './icons/favicon-32x32.png',
-  './icons/favicon-48x48.png',
+  './icons/favicon-16x16.png',
   './icons/apple-touch-icon.png',
   './icons/android-chrome-192x192.png',
   './icons/android-chrome-512x512.png'
 ];
 
-// Dominios externos que cacheamos como runtime
-const RUNTIME_CACHE_HOSTS = [
-  'fonts.googleapis.com',
-  'fonts.gstatic.com',
-  'cdnjs.cloudflare.com',
-  'www.gstatic.com',
-  'cdn.jsdelivr.net',
-  'api.qrserver.com'
-];
-
-// ── INSTALL: pre-cachea todos los assets locales ──
-self.addEventListener('install', event => {
+// Instalar: pre-cachea los assets principales
+self.addEventListener('install', function(event) {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('[SW] Pre-cacheando assets locales');
-        return cache.addAll(PRECACHE_ASSETS);
-      })
-      .then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(function(cache) {
+      console.log('[SW] Cacheando assets principales');
+      return cache.addAll(ASSETS);
+    }).then(function() {
+      return self.skipWaiting();
+    })
   );
 });
 
-// ── ACTIVATE: limpia caches viejas y toma control ──
-self.addEventListener('activate', event => {
+// Activar: limpia caches viejas
+self.addEventListener('activate', function(event) {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => {
-          console.log('[SW] Eliminando cache vieja:', k);
-          return caches.delete(k);
+    caches.keys().then(function(keys) {
+      return Promise.all(
+        keys.filter(function(key) {
+          return key !== CACHE_NAME;
+        }).map(function(key) {
+          console.log('[SW] Eliminando cache vieja:', key);
+          return caches.delete(key);
         })
-      )
-    )
+      );
+    }).then(function() {
+      return self.clients.claim();
+    })
   );
-  self.clients.claim();
 });
 
-// ── FETCH: estrategia cache-first para locales, network-first para externos ──
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
-
-  // Solo interceptar GET requests
+// Fetch: network-first, cache fallback
+self.addEventListener('fetch', function(event) {
+  // Solo cachear GET requests
   if (event.request.method !== 'GET') return;
 
-  // Firebase RTDB: NO cachear (datos en tiempo real)
-  if (url.hostname.includes('firebaseio.com')) return;
+  // No cachear requests de API externas (Google, etc.)
+  var url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
 
-  // Recursos locales: Cache-First
-  if (url.origin === self.location.origin) {
-    event.respondWith(
-      caches.match(event.request).then(cached => {
-        if (cached) return cached;
-        return fetch(event.request).then(response => {
-          // Cachear la respuesta para futuras visitas
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-          }
-          return response;
-        }).catch(() => {
-          // Fallback offline para navegación
-          if (event.request.mode === 'navigate') {
-            return caches.match('./index.html');
-          }
+  event.respondWith(
+    fetch(event.request).then(function(response) {
+      // Si la red responde, actualizamos cache y devolvemos
+      if (response.ok) {
+        var responseClone = response.clone();
+        caches.open(CACHE_NAME).then(function(cache) {
+          cache.put(event.request, responseClone);
         });
-      })
-    );
-    return;
-  }
-
-  // Recursos externos (CDNs): Stale-While-Revalidate
-  if (RUNTIME_CACHE_HOSTS.some(h => url.hostname.includes(h))) {
-    event.respondWith(
-      caches.open(CACHE_NAME).then(cache =>
-        cache.match(event.request).then(cached => {
-          const fetchPromise = fetch(event.request).then(response => {
-            if (response.ok) {
-              cache.put(event.request, response.clone());
-            }
-            return response;
-          }).catch(() => cached);
-          return cached || fetchPromise;
-        })
-      )
-    );
-    return;
-  }
-
-  // Otros recursos: Network only
+      }
+      return response;
+    }).catch(function() {
+      // Si no hay red, servimos desde cache
+      return caches.match(event.request).then(function(cached) {
+        if (cached) return cached;
+        // Fallback a index.html para navegación SPA
+        if (event.request.mode === 'navigate') {
+          return caches.match('./index.html');
+        }
+        return new Response('Offline', { status: 503, statusText: 'Sin conexión' });
+      });
+    })
+  );
 });

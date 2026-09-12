@@ -1,21 +1,28 @@
-# Dependencies
+# — Claves y secretos —
+.env
+.env.local
+.env.production
+*.key
+*.pem
+credentials.json
+service-account.json
+secrets.json
+
+# — API Keys (NUNCA subir estos archivos) —
+**/api-keys*
+**/secrets*
+
+# — Node —
 node_modules/
 
-# Firebase
-.firebase/
-firebase-debug.log
-firestore-debug.log
-ui-debug.log
-
-# OS
+# — OS —
 .DS_Store
 Thumbs.db
 
-# IDE
+# — IDE —
 .vscode/
 .idea/
 
-# Temp
-*.tmp
-*.bak
-public/
+# — Build artifacts —
+dist/
+.cache/
